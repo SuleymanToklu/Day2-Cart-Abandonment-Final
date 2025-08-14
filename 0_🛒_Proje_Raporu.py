@@ -1,45 +1,67 @@
 import streamlit as st
-import pandas as pd
 import joblib
+import os
+import sys
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-try:
-    model = joblib.load('model.pkl')
-    model_columns = joblib.load('model_columns.pkl')
-except FileNotFoundError:
-    st.error("Model dosyaları bulunamadı. Lütfen önce `train_model.py` script'ini çalıştırın.")
-    st.stop()
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from train_model import run_training_pipeline
 
-st.title('🛒 Alışveriş Sepeti Terk Etme Tahmincisi')
-st.sidebar.header('Ziyaretçi Davranışları')
+@st.cache_resource
+def load_or_generate_resources():
+    """
+    Checks if model artifacts exist. If not, runs the training script to generate them.
+    Then, loads and returns the artifacts.
+    """
+    results_path = 'day-2/cart_abandonment_results.pkl'
+    
+    if not os.path.exists(results_path):
+        st.warning("Model dosyaları bulunamadı. Model şimdi eğitiliyor, bu işlem birkaç dakika sürebilir...")
+        with st.spinner('Eğitim süreci çalıştırılıyor...'):
+            success = run_training_pipeline()
+            if not success:
+                st.error("Model eğitimi sırasında bir hata oluştu. Lütfen logları kontrol edin.")
+                return None, None
+    
+    try:
+        results = joblib.load(results_path)
+        return results
+    except FileNotFoundError:
+        return None
 
-product_related = st.sidebar.slider('Gezilen Ürün Sayfası', 0, 700, 30)
-exit_rates = st.sidebar.slider('Çıkış Oranı', 0.0, 0.2, 0.04, format="%.4f")
-page_values = st.sidebar.slider('Sayfa Değeri', 0.0, 362.0, 6.0, format="%.2f")
-month = st.sidebar.selectbox('Ay', ['Feb', 'Mar', 'May', 'June', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
-visitor_type = st.sidebar.selectbox('Ziyaretçi Tipi', ['Returning_Visitor', 'New_Visitor', 'Other'])
+st.set_page_config(page_title="Proje Raporu", page_icon="🛒", layout="wide")
+st.title("🛒 Alışveriş Sepeti Terk Etme Tahmini Projesi")
 
-if st.sidebar.button('Tahmin Yap'):
-    input_dict = {col: 0 for col in model_columns}
-    input_dict['ProductRelated'] = product_related
-    input_dict['ExitRates'] = exit_rates
-    input_dict['PageValues'] = page_values
-    input_dict['Weekend'] = 0 # Simplified for this version
+results = load_or_generate_resources()
 
-    month_col = 'Month_' + month
-    if month_col in input_dict:
-        input_dict[month_col] = 1
+if results:
+    tab1, tab2 = st.tabs(["🎯 **Proje Özeti**", "📊 **Model Performansı**"])
 
-    visitor_col = 'VisitorType_' + visitor_type
-    if visitor_col in input_dict:
-        input_dict[visitor_col] = 1
+    with tab1:
+        st.header("Projenin Amacı ve İş Değeri")
+        st.write("Bu proje, bir online ziyaretçinin davranışlarını analiz ederek satın alma işlemini tamamlayıp tamamlamayacağını önceden tahmin etmeyi amaçlar.")
+        st.info("Modeli canlı olarak test etmek için soldaki menüden **'🧠 Tahmin Araci'** sayfasına geçebilirsiniz.")
 
-    input_df = pd.DataFrame([input_dict])[model_columns]
+    with tab2:
+        st.header("Model Performansı: Baseline vs. Finetuned")
+        baseline = results['baseline']
+        tuned = results['tuned']
+        
+        st.write("İlk 'Baseline' model, satın alacak müşterileri yakalamada zayıf kaldı (**Recall: %57**). Bu sorunu çözmek için, `scale_pos_weight` hiperparametresi ile model **Finetune** edildi ve müşteri yakalama oranı **%68'e** yükseltildi.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Önce: Baseline Model")
+            fig, ax = plt.subplots(figsize=(5,4))
+            sns.heatmap(baseline['cm'], annot=True, fmt='d', cmap='Blues', ax=ax, cbar=False)
+            st.pyplot(fig)
 
-    prediction = model.predict(input_df)
-    prediction_proba = model.predict_proba(input_df)
-
-    st.subheader('🔮 Tahmin Sonucu')
-    if prediction[0] == 1:
-        st.success(f"Bu ziyaretçinin SATIN ALMA olasılığı yüksek! (Olasılık: {prediction_proba[0][1]:.2%})")
-    else:
-        st.error(f"Bu ziyaretçinin SEPETİ TERK ETME olasılığı yüksek. (Satın Almama Olasılığı: {prediction_proba[0][0]:.2%})")
+        with col2:
+            st.subheader("Sonra: Finetuned Model")
+            fig, ax = plt.subplots(figsize=(5,4))
+            sns.heatmap(tuned['cm'], annot=True, fmt='d', cmap='Greens', ax=ax, cbar=False)
+            st.pyplot(fig)
+else:
+    st.error("Kaynaklar yüklenemedi. Lütfen uygulamanın loglarını kontrol edin.")
