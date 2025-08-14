@@ -1,61 +1,76 @@
 import streamlit as st
 import pandas as pd
-import joblib
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
+from sklearn.metrics import recall_score, precision_score, f1_score
+import warnings
 
 st.set_page_config(page_title="Sepeti Terk Etme Tahmini", page_icon="🛒", layout="wide")
+warnings.filterwarnings("ignore", category=UserWarning)
 
 @st.cache_resource
-def load_resources():
-    """Model ve ilgili dosyaları yükler."""
-    try:
-        model = joblib.load('model.pkl')
-        model_columns = joblib.load('model_columns.pkl')
-        results = joblib.load('cart_abandonment_results.pkl')
-        return model, model_columns, results
-    except FileNotFoundError:
-        return None, None, None
+def train_and_prepare_resources():
+    """
+    Veriyi yükler, işler, baseline ve finetuned modelleri eğitir.
+    Gerekli tüm sonuçları ve en iyi modeli hafızada tutmak için döndürür.
+    Bu fonksiyon SADECE BİR KEZ çalışır.
+    """
+    df = pd.read_csv("online_shoppers_intention.csv")
+    df['Weekend'] = df['Weekend'].astype(int)
+    df['Revenue'] = df['Revenue'].astype(int)
+    df_processed = pd.get_dummies(df, columns=['Month', 'VisitorType'], drop_first=True)
+    
+    X = df_processed.drop('Revenue', axis=1)
+    y = df_processed['Revenue']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-model, model_columns, results = load_resources()
+    baseline_model = XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss')
+    baseline_model.fit(X_train, y_train)
+    y_pred_base = baseline_model.predict(X_test)
+    baseline_results = {
+        'Precision': precision_score(y_test, y_pred_base),
+        'Recall': recall_score(y_test, y_pred_base),
+        'F1-Score': f1_score(y_test, y_pred_base)
+    }
+    
+    ratio = (y_train == 0).sum() / (y_train == 1).sum()
+    tuned_model = XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss', scale_pos_weight=ratio)
+    tuned_model.fit(X_train, y_train)
+    y_pred_tuned = tuned_model.predict(X_test)
+    tuned_results = {
+        'Precision': precision_score(y_test, y_pred_tuned),
+        'Recall': recall_score(y_test, y_pred_tuned),
+        'F1-Score': f1_score(y_test, y_pred_tuned)
+    }
+    
+    feature_imp = pd.DataFrame(data=tuned_model.feature_importances_, index=list(X.columns), columns=['Value'])
+    feature_imp = feature_imp.sort_values(by="Value", ascending=False).head(10)
+
+    return tuned_model, list(X.columns), baseline_results, tuned_results, feature_imp
 
 st.title("🛒 Alışveriş Sepeti Terk Etme Tahmini Projesi")
-st.markdown("Bu interaktif uygulama, bir online ziyaretçinin davranışlarını analiz ederek satın alma işlemini tamamlayıp tamamlamayacağını tahmin eder.")
 
-if not all([model, model_columns, results]):
-    st.error("Model dosyaları bulunamadı. Lütfen önce `train_model.py`'yi çalıştırıp dosyaları GitHub'a gönderdiğinizden emin olun.")
-    st.stop()
+with st.spinner('Model ve kaynaklar yükleniyor... Bu işlem ilk çalıştırmada biraz sürebilir.'):
+    model, model_columns, baseline_results, tuned_results, feature_imp = train_and_prepare_resources()
+
+st.success("Model başarıyla yüklendi ve kullanıma hazır!")
+st.markdown("---")
 
 tab1, tab2, tab3 = st.tabs(["🎯 **Proje Raporu**", "🧠 **Tahmin Aracı**", "🔧 **Teknik Detaylar**"])
 
 with tab1:
     st.header("Projenin Amacı ve İş Değeri")
     st.image("https://i.imgur.com/6Q5Z2Xk.png", caption="Müşteri yolculuğu ve terk etme noktası")
-    st.write("""
-    Bu projenin temel amacı, bir online ziyaretçinin davranışlarını analiz ederek satın alma işlemini tamamlayıp tamamlamayacağını önceden tahmin etmektir.
-    Bu, e-ticaret şirketlerinin potansiyel satış kayıplarını önceden tespit ederek özel indirimler veya hatırlatmalarla bu müşterileri geri kazanmalarına yardımcı olabilir.
-    """)
+    st.write("Bu proje, bir online ziyaretçinin davranışlarını analiz ederek satın alma işlemini tamamlayıp tamamlamayacağını önceden tahmin etmeyi amaçlar.")
     
     st.header("Model Performansı: Baseline vs. Finetuned")
-    st.write("""
-    İlk 'Baseline' model, satın alacak müşterileri yakalamada zayıf kaldı. Bu sorunu çözmek için, dengesiz veri setine özel bir hiperparametre (`scale_pos_weight`) ile model **Finetune** edildi ve müşteri yakalama oranı (Recall) **%57'den %68'e** yükseltildi.
-    """)
+    st.write("İlk 'Baseline' model, satın alacak müşterileri yakalamada zayıf kaldı (**Recall: 57%**). Bu sorunu çözmek için, `scale_pos_weight` hiperparametresi ile model **Finetune** edildi ve müşteri yakalama oranı **68%'e** yükseltildi.")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Önce: Baseline Model")
-        st.image("baseline_cm.png", use_container_width=True)
-        st.caption(f"Bu model, satın alacak olan **{results['baseline']['cm'][1][0] + results['baseline']['cm'][1][1]}** müşteriden **{results['baseline']['cm'][1][0]}** tanesini kaçırdı.")
-
-    with col2:
-        st.subheader("Sonra: Finetuned Model")
-        st.image("tuned_cm.png", use_container_width=True)
-        st.caption(f"Finetuning sonrası, kaçırılan müşteri sayısı **{results['tuned']['cm'][1][0]}'a** düştü. Model artık daha fazla potansiyel alıcıyı doğru tespit edebiliyor.")
+    metrics_df = pd.DataFrame({'Baseline Model': baseline_results, 'Finetuned Model': tuned_results})
+    st.dataframe(metrics_df.style.format("{:.2%}"))
 
 with tab2:
     st.header("Canlı Tahmin Aracı")
-    st.write("Aşağıdaki slider ve seçenekleri değiştirerek farklı ziyaretçi profilleri için tahminler yapabilirsiniz.")
-
     with st.form(key='prediction_form'):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -100,17 +115,13 @@ with tab2:
 
 with tab3:
     st.header("Teknik Detaylar ve Öğrenimler")
-    
     with st.expander("🤔 Neden Sadece 'Accuracy' Yeterli Değil? - Tembel Doktor Analojisi"):
         st.write("""
-        Bu projede olduğu gibi **dengesiz veri setlerinde** (bir sınıfın diğerinden çok daha fazla olduğu durumlarda), sadece doğruluk oranına bakmak yanıltıcı olabilir. 
-        
+        Bu projede olduğu gibi **dengesiz veri setlerinde**, sadece doğruluk oranına bakmak yanıltıcı olabilir. 
         **Örnek:** 1000 hastadan sadece 1'inin hasta olduğu nadir bir hastalığı düşünelim. Hiçbir test yapmadan herkese "Sen hasta değilsin" diyen tembel bir doktor, **%99.9 doğruluk oranına** sahip olur. Ancak asıl görevi olan o 1 hastayı bulma işinde **%100 başarısızdır.**
-        
-        Bizim projemizde de müşterilerin sadece %15'i satın alma yapıyor. Bu yüzden, modelimizin ne kadar iyi olduğunu anlamak için **Precision** (keskinlik) ve özellikle **Recall** (müşteri yakalama oranı) gibi daha derin metriklere odaklandık.
+        Bizim projemizde de müşterilerin sadece %15'i satın alma yapıyor. Bu yüzden, **Recall** (müşteri yakalama oranı) gibi daha derin metriklere odaklandık.
         """)
 
     st.subheader("Modelin Karar Kriterleri")
     st.write("Aşağıda modelin, tahmin yaparken en çok önem verdiği 10 kriteri görebilirsiniz:")
-    st.image("feature_importance.png", use_container_width=True)
-    st.caption("Grafikten de anlaşıldığı üzere, bir kullanıcının 'Sayfa Değeri' (PageValues) ve siteden 'Çıkış Oranı' (ExitRates), satın alma niyetini belirlemede en güçlü sinyallerdir.")
+    st.bar_chart(feature_imp)
