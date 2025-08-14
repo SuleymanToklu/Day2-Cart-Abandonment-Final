@@ -1,37 +1,54 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score
 import joblib
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
-def train_and_save_model():
-    print("1/3 - Loading data...")
-    df = pd.read_csv("online_shoppers_intention.csv")
-
-    print("2/3 - Preprocessing data and training model...")
-    df['Weekend'] = df['Weekend'].astype(int)
-    df['Revenue'] = df['Revenue'].astype(int)
-    df_processed = pd.get_dummies(df, columns=['Month', 'VisitorType'], drop_first=True)
-
-    X = df_processed.drop('Revenue', axis=1)
-    y = df_processed['Revenue']
-
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+def train_and_evaluate(X_train, X_test, y_train, y_test):
+    """Trains baseline and finetuned models and returns the champion model and results."""
+    print("Training and evaluating models...")
+    
+    baseline_model = XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss')
+    baseline_model.fit(X_train, y_train)
+    y_pred_base = baseline_model.predict(X_test)
+    
+    baseline_results = {
+        'name': 'XGBoost (Baseline)',
+        'recall': recall_score(y_test, y_pred_base),
+        'precision': precision_score(y_test, y_pred_base),
+        'f1': f1_score(y_test, y_pred_base),
+        'cm': confusion_matrix(y_test, y_pred_base) 
+    }
+    print("\n--- Baseline Model Results ---")
+    print(classification_report(y_test, y_pred_base))
 
     ratio = (y_train == 0).sum() / (y_train == 1).sum()
-    model = XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss', scale_pos_weight=ratio)
-    model.fit(X_train, y_train)
+    tuned_model = XGBClassifier(
+        random_state=42, use_label_encoder=False, eval_metric='logloss', scale_pos_weight=ratio
+    )
+    tuned_model.fit(X_train, y_train)
+    y_pred_tuned = tuned_model.predict(X_test)
 
-    print("\n--- Model Performance ---")
-    print(classification_report(y_test, model.predict(X_test)))
+    tuned_results = {
+        'name': 'XGBoost (Finetuned)',
+        'recall': recall_score(y_test, y_pred_tuned),
+        'precision': precision_score(y_test, y_pred_tuned),
+        'f1': f1_score(y_test, y_pred_tuned),
+        'cm': confusion_matrix(y_test, y_pred_tuned) 
+    }
+    print("\n--- Finetuned Model Results ---")
+    print(classification_report(y_test, y_pred_tuned))
+    
+    return tuned_model, baseline_results, tuned_results
 
-    print("3/3 - Saving artifacts...")
-    joblib.dump(model, 'model.pkl')
-    model_columns = list(X.columns)
-    joblib.dump(model_columns, 'model_columns.pkl')
-    print("✅ Artifacts saved successfully!")
+def save_artifacts(model, columns, results, project_name):
+    """Saves the model, columns, and results to .pkl files."""
+    print("\nSaving artifacts...")
+    
+    joblib.dump(model, f'{project_name}_model.pkl')
+    joblib.dump(columns, f'{project_name}_columns.pkl')
+    joblib.dump(results, f'{project_name}_results.pkl')
 
-if __name__ == "__main__":
-    train_and_save_model()
+    print(f"✅ All artifacts for '{project_name}' saved successfully!")
