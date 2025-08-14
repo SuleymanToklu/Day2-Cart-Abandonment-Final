@@ -10,7 +10,6 @@ import seaborn as sns
 warnings.filterwarnings("ignore", category=UserWarning)
 
 def create_confusion_matrix_plot(cm, title, filename):
-    """Creates and saves a confusion matrix plot."""
     plt.figure(figsize=(6, 4))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', cbar=False,
                 xticklabels=['Terk Etti', 'Satın Aldı'], yticklabels=['Terk Etti', 'Satın Aldı'])
@@ -22,7 +21,6 @@ def create_confusion_matrix_plot(cm, title, filename):
     print(f"✅ Plot saved: {filename}")
 
 def create_feature_importance_plot(model, columns, filename):
-    """Creates and saves a feature importance plot."""
     feature_imp = pd.DataFrame(sorted(zip(model.feature_importances_, columns)), columns=['Value','Feature'])
     plt.figure(figsize=(10, 6))
     sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value", ascending=False).head(10), palette='viridis')
@@ -52,6 +50,10 @@ def run_training_pipeline():
     y_pred_base = baseline_model.predict(X_test)
     baseline_cm = confusion_matrix(y_test, y_pred_base)
     create_confusion_matrix_plot(baseline_cm, 'Baseline Model Performansı', 'baseline_cm.png')
+    baseline_results = {
+        'recall': recall_score(y_test, y_pred_base), 'precision': precision_score(y_test, y_pred_base),
+        'f1': f1_score(y_test, y_pred_base), 'cm': baseline_cm
+    }
     
     ratio = (y_train == 0).sum() / (y_train == 1).sum()
     tuned_model = XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss', scale_pos_weight=ratio)
@@ -59,11 +61,17 @@ def run_training_pipeline():
     tuned_cm = confusion_matrix(y_test, tuned_model.predict(X_test))
     create_confusion_matrix_plot(tuned_cm, 'Finetuned Model Performansı', 'tuned_cm.png')
     create_feature_importance_plot(tuned_model, list(X.columns), 'feature_importance.png')
+    tuned_results = {
+        'recall': recall_score(y_test, tuned_model.predict(X_test)), 'precision': precision_score(y_test, tuned_model.predict(X_test)),
+        'f1': f1_score(y_test, tuned_model.predict(X_test)), 'cm': tuned_cm
+    }
 
     print("4/4 - Saving artifacts...")
-    joblib.dump(tuned_model, 'model.pkl')
-    joblib.dump(list(X.columns), 'model_columns.pkl')
-    print("✅ Artifacts saved successfully!")
+    comparison_results = {'baseline': baseline_results, 'tuned': tuned_results}
+    joblib.dump(comparison_results, 'cart_abandonment_results.pkl')
+    joblib.dump(tuned_model, 'cart_abandonment_model.pkl')
+    joblib.dump(list(X.columns), 'cart_abandonment_columns.pkl')
+    print("✅ All artifacts saved successfully!")
 
 if __name__ == "__main__":
     run_training_pipeline()
