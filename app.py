@@ -60,7 +60,6 @@ tab1, tab2, tab3 = st.tabs(["🎯 **Proje Raporu**", "🧠 **Tahmin Aracı**", "
 
 with tab1:
     st.header("Projenin Amacı ve İş Değeri")
-    st.image("https://i.imgur.com/6Q5Z2Xk.png", caption="Müşteri yolculuğu ve terk etme noktası")
     st.write("Bu proje, bir online ziyaretçinin davranışlarını analiz ederek satın alma işlemini tamamlayıp tamamlamayacağını önceden tahmin etmeyi amaçlar.")
     
     st.header("Model Performansı: Baseline vs. Finetuned")
