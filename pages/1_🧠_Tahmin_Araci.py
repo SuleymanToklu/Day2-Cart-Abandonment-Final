@@ -2,19 +2,20 @@
 
 import streamlit as st
 import pandas as pd
-import joblib
 
-# --- Kaynakları Yükleme ---
-try:
-    model = joblib.load('day-2/cart_abandonment_model.pkl')
-    model_columns = joblib.load('day-2/cart_abandonment_columns.pkl')
-except FileNotFoundError:
-    st.error("Model dosyaları bulunamadı. Lütfen önce `train_model.py`'yi çalıştırıp dosyaları GitHub'a gönderdiğinizden emin olun.")
+st.set_page_config(page_title="Tahmin Aracı", page_icon="🧠", layout="wide")
+st.title('🧠 Sepeti Terk Etme Tahmin Aracı')
+
+# --- Check if model is loaded from the main page ---
+if 'model' not in st.session_state or 'model_columns' not in st.session_state:
+    st.warning("Lütfen önce ana sayfayı ziyaret ederek modelin yüklenmesini sağlayın.")
     st.stop()
 
-st.title('🧠 Sepeti Terk Etme Tahmin Araci')
+# --- Load resources from session state ---
+model = st.session_state['model']
+model_columns = st.session_state['model_columns']
 
-# --- Kullanıcı Girdileri ---
+# --- User Inputs ---
 st.sidebar.header('Ziyaretçi Davranışları')
 product_related = st.sidebar.slider('Gezilen Ürün Sayfası', 0, 700, 30)
 exit_rates = st.sidebar.slider('Çıkış Oranı', 0.0, 0.2, 0.04, format="%.4f")
@@ -23,7 +24,7 @@ month = st.sidebar.selectbox('Ay', ['Feb', 'Mar', 'May', 'June', 'Jul', 'Aug', '
 visitor_type = st.sidebar.selectbox('Ziyaretçi Tipi', ['Returning_Visitor', 'New_Visitor', 'Other'])
 
 if st.sidebar.button('Tahmin Yap'):
-    # --- Tahmin Mantığı ---
+    # --- Prediction Logic ---
     input_dict = {col: 0 for col in model_columns}
     input_dict['ProductRelated'] = product_related
     input_dict['ExitRates'] = exit_rates
@@ -42,7 +43,7 @@ if st.sidebar.button('Tahmin Yap'):
     prediction = model.predict(input_df)
     prediction_proba = model.predict_proba(input_df)
 
-    # --- Sonuç Ekranı ---
+    # --- Result Display ---
     st.subheader('🔮 Tahmin Sonucu')
     if prediction[0] == 1:
         st.success(f"Bu ziyaretçinin SATIN ALMA olasılığı yüksek! (Olasılık: {prediction_proba[0][1]:.2%})")
